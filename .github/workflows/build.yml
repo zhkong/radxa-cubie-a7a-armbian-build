@@ -96,7 +96,8 @@ jobs:
             BRANCH=vendor \
             BUILD_DESKTOP=no \
             BUILD_MINIMAL=no \
-            RELEASE=trixie
+            RELEASE=trixie \
+            KERNEL_CONFIGURE=no
 
       - name: Locate build output and extract version
         if: steps.check.outputs.skip != 'true'
