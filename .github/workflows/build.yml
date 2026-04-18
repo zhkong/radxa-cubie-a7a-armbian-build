@@ -117,16 +117,43 @@ jobs:
             exit 1
           fi
           BASENAME=$(basename "$IMG")
-          echo "image_path=$IMG" >> "$GITHUB_OUTPUT"
-          echo "image_name=$BASENAME" >> "$GITHUB_OUTPUT"
+          IMG_DIR=$(dirname "$IMG")
 
           VERSION=$(echo "$BASENAME" | grep -oP 'Armbian[_-]\K[0-9]+\.[0-9]+(\.[0-9]+)?' || echo "unknown")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Detected Armbian version: $VERSION"
           echo "Image: $IMG"
+          ls -lh "$IMG"
 
-          sha256sum "$IMG" > "${IMG}.sha256"
-          echo "sha_path=${IMG}.sha256" >> "$GITHUB_OUTPUT"
+          # GitHub Release assets have a hard limit of 2 GiB per file.
+          # Raw .img files for this board exceed that limit, so we pack
+          # the image with tar + gzip (using pigz for parallel speed).
+          # Raw ext4 images with many zero blocks compress very well.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pigz
+          ARCHIVE_NAME="${BASENAME}.tar.gz"
+          ARCHIVE_PATH="${IMG_DIR}/${ARCHIVE_NAME}"
+          echo "Packing image into ${ARCHIVE_PATH} ..."
+          tar --use-compress-program='pigz -9' \
+            -cf "$ARCHIVE_PATH" \
+            -C "$IMG_DIR" "$BASENAME"
+          ls -lh "$ARCHIVE_PATH"
+
+          ARCHIVE_SIZE=$(stat -c%s "$ARCHIVE_PATH")
+          MAX_SIZE=2147483648
+          if [ "$ARCHIVE_SIZE" -ge "$MAX_SIZE" ]; then
+            echo "::error::Archive size ${ARCHIVE_SIZE} still exceeds GitHub's 2 GiB asset limit"
+            exit 1
+          fi
+
+          # Free up disk space: original image no longer needed for upload.
+          rm -f "$IMG"
+
+          echo "image_path=$ARCHIVE_PATH" >> "$GITHUB_OUTPUT"
+          echo "image_name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+
+          sha256sum "$ARCHIVE_PATH" | sed "s| .*/| |" > "${ARCHIVE_PATH}.sha256"
+          echo "sha_path=${ARCHIVE_PATH}.sha256" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         if: steps.check.outputs.skip != 'true'
@@ -158,6 +185,10 @@ jobs:
           ### Customizations
           - Kernel: CONFIG_IPV6_MULTIPLE_TABLES, CONFIG_IP_MULTIPLE_TABLES, CONFIG_IP_ADVANCED_ROUTER enabled
           - Mirror: USTC mirrors pre-configured for Debian and Armbian repositories
+
+          ### Notes
+          - The image is packaged as \`.img.tar.gz\` to stay within GitHub's 2 GiB per-asset limit.
+          - Extract before flashing: \`tar -xzvf <file>.img.tar.gz\`
           EOF
           )" \
             "${{ steps.artifact.outputs.image_path }}" \
