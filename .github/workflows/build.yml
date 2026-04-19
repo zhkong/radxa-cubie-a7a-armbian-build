@@ -119,10 +119,18 @@ jobs:
           BASENAME=$(basename "$IMG")
           IMG_DIR=$(dirname "$IMG")
 
-          VERSION=$(echo "$BASENAME" | grep -oP 'Armbian[_-]\K[0-9]+\.[0-9]+(\.[0-9]+)?' || echo "unknown")
+          # Armbian image filenames typically look like:
+          #   Armbian-unofficial_25.11.0-trunk_Radxa-cubie-a7a_trixie_vendor_6.6.x.img.xz
+          #   Armbian_community_25.5.0_Radxa-cubie-a7a_...
+          # so extract the first MAJOR.MINOR.PATCH(-suffix)? token from the basename.
+          VERSION=$(echo "$BASENAME" | grep -oP '[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9]+)?' | head -n 1)
+          if [ -z "$VERSION" ]; then
+            VERSION="unknown"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Detected Armbian version: $VERSION"
           echo "Image: $IMG"
+          echo "Basename: $BASENAME"
           ls -lh "$IMG"
 
           # GitHub Release assets have a hard limit of 2 GiB per file.
